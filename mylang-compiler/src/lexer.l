@@ -24,6 +24,10 @@ ID      [a-zA-Z_][a-zA-Z0-9_]*
 "for"           { return FOR; }
 "int"           { return INT; }
 "float"         { return FLOAT; }
+"string"        { return STRING; }
+"int[]"         { return INT_ARRAY; }
+"float[]"       { return FLOAT_ARRAY; }
+"string[]"      { return STRING_ARRAY; }
 "return"        { return RETURN; }
 "print"         { return PRINT; }
 
@@ -33,6 +37,9 @@ ID      [a-zA-Z_][a-zA-Z0-9_]*
 ">="            { return GE; }
 "&&"            { return AND; }
 "||"            { return OR; }
+
+"["             { return '['; }
+"]"             { return ']'; }
 
 \"([^"\\\n]|\\["\\nrt])*\" { 
     yytext[yyleng-1] = '\0';  // 去掉结束引号

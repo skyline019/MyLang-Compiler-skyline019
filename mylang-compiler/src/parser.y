@@ -6,7 +6,7 @@
 extern int yylex();
 extern int yylineno;
 extern FILE *yyin;
-extern char* yytext;  // 添加这行以获取当前token
+extern char* yytext;
 
 void yyerror(const char *s);
 ASTNode *program_root;
@@ -24,11 +24,13 @@ ASTNode *program_root;
 %token <float_val> FLOAT
 %token <string> IDENTIFIER STRING
 %token IF ELSE WHILE FOR INT RETURN PRINT
+%token INT_ARRAY FLOAT_ARRAY STRING_ARRAY
 %token EQ NE LE GE AND OR
-%token IFX
+%token IFX '[' ']'
 
 %type <ast> program stmt_list stmt expr decl block if_stmt while_stmt for_stmt
 %type <ast> logical_expr equality_expr rel_expr add_expr mul_expr primary expr_list
+%type <ast> array_decl array_access
 
 %%
 
@@ -57,6 +59,7 @@ stmt_list: stmt {
 
 stmt: expr ';' { $$ = $1; }
 | decl ';' { $$ = $1; }
+| array_decl ';' { $$ = $1; }
 | if_stmt { $$ = $1; }
 | while_stmt { $$ = $1; }
 | for_stmt { $$ = $1; }
@@ -75,6 +78,14 @@ decl: INT IDENTIFIER { $$ = ast_new_declaration($2, yylineno); }
 | FLOAT IDENTIFIER '=' expr { $$ = ast_new_declaration_init($2, $4, yylineno); }
 | STRING IDENTIFIER { $$ = ast_new_declaration($2, yylineno); }
 | STRING IDENTIFIER '=' expr { $$ = ast_new_declaration_init($2, $4, yylineno); }
+;
+
+array_decl: INT_ARRAY IDENTIFIER { $$ = ast_new_array_declaration($2, NULL, yylineno); }
+| INT_ARRAY IDENTIFIER '[' expr ']' { $$ = ast_new_array_declaration($2, $4, yylineno); }
+| FLOAT_ARRAY IDENTIFIER { $$ = ast_new_array_declaration($2, NULL, yylineno); }
+| FLOAT_ARRAY IDENTIFIER '[' expr ']' { $$ = ast_new_array_declaration($2, $4, yylineno); }
+| STRING_ARRAY IDENTIFIER { $$ = ast_new_array_declaration($2, NULL, yylineno); }
+| STRING_ARRAY IDENTIFIER '[' expr ']' { $$ = ast_new_array_declaration($2, $4, yylineno); }
 ;
 
 block: '{' stmt_list '}' { $$ = $2; }
@@ -104,6 +115,9 @@ for_stmt: FOR '(' expr ';' expr ';' expr ')' stmt {
 
 expr: IDENTIFIER '=' expr { 
     $$ = ast_new_assignment(ast_new_variable($1, yylineno), $3, yylineno); 
+}
+| array_access '=' expr {
+    $$ = ast_new_array_assignment($1, $3, yylineno);
 }
 | logical_expr { $$ = $1; }
 ;
@@ -166,21 +180,20 @@ primary: INTEGER { $$ = ast_new_integer($1, yylineno); }
 | FLOAT { $$ = ast_new_float($1, yylineno); }
 | STRING { $$ = ast_new_string($1, yylineno); }
 | IDENTIFIER { $$ = ast_new_variable($1, yylineno); }
+| array_access { $$ = $1; }
 | '(' expr ')' { $$ = $2; }
 | IDENTIFIER '(' ')' {
     ASTNode **args = NULL;
     $$ = ast_new_function_call($1, args, 0, yylineno);
 }
 | IDENTIFIER '(' expr_list ')' {
-    // 这里需要正确处理参数计数
     int arg_count = 0;
     ASTNode *current = $3;
     while (current != NULL) {
         arg_count++;
-        current = current->binary.right; // 假设参数以链表形式存储
+        current = current->binary.right;
     }
     
-    // 将参数链表转换为数组
     ASTNode **args = malloc(arg_count * sizeof(ASTNode *));
     current = $3;
     for (int i = 0; i < arg_count; i++) {
@@ -189,14 +202,16 @@ primary: INTEGER { $$ = ast_new_integer($1, yylineno); }
     }
     
     $$ = ast_new_function_call($1, args, arg_count, yylineno);
-    
-    // 释放临时链表结构
     ast_free($3);
 }
 ;
 
+array_access: IDENTIFIER '[' expr ']' {
+    $$ = ast_new_array_access($1, $3, yylineno);
+}
+;
+
 expr_list: expr {
-    // 创建链表节点来存储参数
     ASTNode *node = malloc(sizeof(ASTNode));
     node->type = AST_BINARY_OP;
     node->line_no = yylineno;
@@ -206,7 +221,6 @@ expr_list: expr {
     $$ = node;
 }
 | expr_list ',' expr {
-    // 添加到链表末尾
     ASTNode *node = malloc(sizeof(ASTNode));
     node->type = AST_BINARY_OP;
     node->line_no = yylineno;
@@ -214,7 +228,6 @@ expr_list: expr {
     node->binary.left = $3;
     node->binary.right = NULL;
     
-    // 找到链表末尾
     ASTNode *current = $1;
     while (current->binary.right != NULL) {
         current = current->binary.right;

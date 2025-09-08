@@ -10,7 +10,10 @@ typedef struct {
     int int_value;
     float float_value;
     char* string_value;
-    int type;  // 0: int, 1: float, 2: string
+    int type;  // 0: int, 1: float, 2: string, 3: int[], 4: float[], 5: string[]
+    int array_size;
+    void* array_data;
+    bool is_initialized;  // 添加初始化标志
 } Symbol;
 
 // 全局符号表
@@ -56,6 +59,7 @@ static void set_symbol(const char* name, int int_value, float float_value, char*
             }
             symbol_table[i].string_value = string_value ? strdup(string_value) : NULL;
             symbol_table[i].type = type;
+            symbol_table[i].is_initialized = true;
             return;
         }
     }
@@ -74,8 +78,12 @@ static void set_symbol(const char* name, int int_value, float float_value, char*
     symbol_table[symbol_count].float_value = float_value;
     symbol_table[symbol_count].string_value = string_value ? strdup(string_value) : NULL;
     symbol_table[symbol_count].type = type;
+    symbol_table[symbol_count].array_size = 0;
+    symbol_table[symbol_count].array_data = NULL;
+    symbol_table[symbol_count].is_initialized = false;
     symbol_count++;
 }
+
 
 // 释放符号表
 void ast_free_symbol_table() {
@@ -83,6 +91,17 @@ void ast_free_symbol_table() {
         free(symbol_table[i].name);
         if (symbol_table[i].string_value != NULL) {
             free(symbol_table[i].string_value);
+        }
+        if (symbol_table[i].array_data != NULL) {
+            if (symbol_table[i].type == 5) {  // string[]
+                char** str_array = (char**)symbol_table[i].array_data;
+                for (int j = 0; j < symbol_table[i].array_size; j++) {
+                    if (str_array[j] != NULL) {
+                        free(str_array[j]);
+                    }
+                }
+            }
+            free(symbol_table[i].array_data);
         }
     }
     free(symbol_table);
@@ -122,7 +141,32 @@ ASTNode *ast_new_variable(char *name, int line_no) {
     node->string_value = strdup(name);
     return node;
 }
+ASTNode *ast_new_array_declaration(char *var_name, ASTNode *size, int line_no) {
+    ASTNode *node = malloc(sizeof(ASTNode));
+    node->type = AST_ARRAY_DECLARATION;
+    node->line_no = line_no;
+    node->array_decl.var_name = strdup(var_name);
+    node->array_decl.size = size;
+    return node;
+}
 
+ASTNode *ast_new_array_access(char *var_name, ASTNode *index, int line_no) {
+    ASTNode *node = malloc(sizeof(ASTNode));
+    node->type = AST_ARRAY_ACCESS;
+    node->line_no = line_no;
+    node->array_access.var_name = strdup(var_name);
+    node->array_access.index = index;
+    return node;
+}
+
+ASTNode *ast_new_array_assignment(ASTNode *array_access, ASTNode *value, int line_no) {
+    ASTNode *node = malloc(sizeof(ASTNode));
+    node->type = AST_ARRAY_ASSIGNMENT;
+    node->line_no = line_no;
+    node->array_assignment.array_access = array_access;
+    node->array_assignment.value = value;
+    return node;
+}
 ASTNode *ast_new_binary_op(char *op, ASTNode *left, ASTNode *right, int line_no) {
     ASTNode *node = malloc(sizeof(ASTNode));
     node->type = AST_BINARY_OP;
@@ -285,6 +329,25 @@ void ast_print(ASTNode *node, int indent) {
         case AST_VARIABLE:
             printf("VARIABLE(%s)\n", node->string_value);
             break;
+        case AST_ARRAY_DECLARATION:
+            printf("ARRAY_DECLARATION(%s", node->array_decl.var_name);
+            if (node->array_decl.size) {
+                printf("[");
+                ast_print(node->array_decl.size, 0);
+                printf("]");
+            }
+            printf(")\n");
+            break;
+        case AST_ARRAY_ACCESS:
+            printf("ARRAY_ACCESS(%s[", node->array_access.var_name);
+            ast_print(node->array_access.index, 0);
+            printf("])\n");
+            break;
+        case AST_ARRAY_ASSIGNMENT:
+            printf("ARRAY_ASSIGNMENT\n");
+            ast_print(node->array_assignment.array_access, indent + 1);
+            ast_print(node->array_assignment.value, indent + 1);
+            break;
         case AST_BINARY_OP:
             printf("BINARY_OP(%s)\n", node->binary.op);
             ast_print(node->binary.left, indent + 1);
@@ -359,6 +422,18 @@ void ast_free(ASTNode *node) {
             break;
         case AST_VARIABLE:
             free(node->string_value);
+            break;
+        case AST_ARRAY_DECLARATION:
+            free(node->array_decl.var_name);
+            ast_free(node->array_decl.size);
+            break;
+        case AST_ARRAY_ACCESS:
+            free(node->array_access.var_name);
+            ast_free(node->array_access.index);
+            break;
+        case AST_ARRAY_ASSIGNMENT:
+            ast_free(node->array_assignment.array_access);
+            ast_free(node->array_assignment.value);
             break;
         case AST_BINARY_OP:
             free(node->binary.op);
@@ -556,6 +631,210 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             *float_result = sym->float_value;
             break;
         }
+        case AST_ARRAY_DECLARATION: {
+            int size = 0;
+            if (node->array_decl.size) {
+                int temp_int;
+                float temp_float;
+                bool temp_is_int;
+                ast_interpret_node(node->array_decl.size, &temp_int, &temp_float, &temp_is_int);
+                size = temp_int;
+                if (size <= 0) {
+                    fprintf(stderr, "Error: Array size must be positive\n");
+                    exit(1);
+                }
+            }
+            
+            // 根据数组类型分配内存
+            int type;
+            void* array_data = NULL;
+            if (strstr(node->array_decl.var_name, "int[]")) {
+                type = 3;  // int[]
+                if (size > 0) {
+                    array_data = calloc(size, sizeof(int));
+                    if (!array_data) {
+                        fprintf(stderr, "Error: Memory allocation failed for int array %s\n", node->array_decl.var_name);
+                        exit(1);
+                    }
+                }
+            } else if (strstr(node->array_decl.var_name, "float[]")) {
+                type = 4;  // float[]
+                if (size > 0) {
+                    array_data = calloc(size, sizeof(float));
+                    if (!array_data) {
+                        fprintf(stderr, "Error: Memory allocation failed for float array %s\n", node->array_decl.var_name);
+                        exit(1);
+                    }
+                }
+            } else {
+                type = 5;  // string[]
+                if (size > 0) {
+                    array_data = calloc(size, sizeof(char*));
+                    if (!array_data) {
+                        fprintf(stderr, "Error: Memory allocation failed for string array %s\n", node->array_decl.var_name);
+                        exit(1);
+                    }
+                }
+            }
+            
+            set_symbol(node->array_decl.var_name, 0, 0.0f, NULL, type);
+            symbol_table[symbol_count-1].array_size = size;
+            symbol_table[symbol_count-1].array_data = array_data;
+            symbol_table[symbol_count-1].is_initialized = true;
+            
+            printf("Declared array %s with size %d\n", node->array_decl.var_name, size);
+            *is_int = true;
+            *int_result = 0;
+            *float_result = 0.0f;
+            break;
+        }
+
+        case AST_ARRAY_ACCESS: {
+            Symbol* sym = find_symbol(node->array_access.var_name);
+            if (sym == NULL) {
+                fprintf(stderr, "Error: Array '%s' not declared\n", node->array_access.var_name);
+                exit(1);
+            }
+            
+            if (!sym->is_initialized) {
+                fprintf(stderr, "Error: Array '%s' not initialized\n", node->array_access.var_name);
+                exit(1);
+            }
+            
+            if (node->array_access.index == NULL) {
+                fprintf(stderr, "Error: Array index expression is NULL\n");
+                exit(1);
+            }
+            
+            int index;
+            float temp_float;
+            bool temp_is_int;
+            ast_interpret_node(node->array_access.index, &index, &temp_float, &temp_is_int);
+            
+            if (index < 0 || index >= sym->array_size) {
+                fprintf(stderr, "Error: Array index out of bounds (index: %d, size: %d)\n", index, sym->array_size);
+                exit(1);
+            }
+            
+            if (sym->array_data == NULL) {
+                fprintf(stderr, "Error: Array '%s' data is NULL\n", node->array_access.var_name);
+                exit(1);
+            }
+            
+            switch (sym->type) {
+                case 3:  // int[]
+                    *is_int = true;
+                    *int_result = ((int*)sym->array_data)[index];
+                    *float_result = (float)*int_result;
+                    break;
+                case 4:  // float[]
+                    *is_int = false;
+                    *float_result = ((float*)sym->array_data)[index];
+                    *int_result = (int)*float_result;
+                    break;
+                case 5:  // string[]
+                    *is_int = false;
+                    *int_result = 0;
+                    *float_result = 0.0f;
+                    if (((char**)sym->array_data)[index] != NULL) {
+                        // 字符串值需要通过其他方式处理
+                    }
+                    break;
+                default:
+                    fprintf(stderr, "Error: '%s' is not an array\n", node->array_access.var_name);
+                    exit(1);
+            }
+            break;
+        }
+
+        case AST_ARRAY_ASSIGNMENT: {
+            if (!node->array_assignment.array_access || !node->array_assignment.value) {
+                fprintf(stderr, "Error: Invalid array assignment\n");
+                exit(1);
+            }
+            
+            char* var_name = node->array_assignment.array_access->array_access.var_name;
+            Symbol* sym = find_symbol(var_name);
+            if (sym == NULL) {
+                fprintf(stderr, "Error: Array '%s' not declared\n", var_name);
+                exit(1);
+            }
+            
+            if (!sym->is_initialized) {
+                fprintf(stderr, "Error: Array '%s' not initialized\n", var_name);
+                exit(1);
+            }
+            
+            if (node->array_assignment.array_access->array_access.index == NULL) {
+                fprintf(stderr, "Error: Array index expression is NULL\n");
+                exit(1);
+            }
+            
+            int index;
+            float temp_float;
+            bool temp_is_int;
+            ast_interpret_node(node->array_assignment.array_access->array_access.index, &index, &temp_float, &temp_is_int);
+            
+            if (index < 0 || index >= sym->array_size) {
+                fprintf(stderr, "Error: Array index out of bounds (index: %d, size: %d)\n", index, sym->array_size);
+                exit(1);
+            }
+            
+            if (sym->array_data == NULL) {
+                fprintf(stderr, "Error: Array '%s' data is NULL\n", var_name);
+                exit(1);
+            }
+            
+            int value_int;
+            float value_float;
+            bool value_is_int;
+            ast_interpret_node(node->array_assignment.value, &value_int, &value_float, &value_is_int);
+            
+            switch (sym->type) {
+                case 3:  // int[]
+                    ((int*)sym->array_data)[index] = value_int;
+                    printf("Assigned %s[%d] = %d\n", var_name, index, value_int);
+                    break;
+                case 4:  // float[]
+                    ((float*)sym->array_data)[index] = value_float;
+                    printf("Assigned %s[%d] = %f\n", var_name, index, value_float);
+                    break;
+                case 5: {  // string[]
+                    char** str_array = (char**)sym->array_data;
+                    if (str_array[index] != NULL) {
+                        free(str_array[index]);
+                    }
+                    
+                    // 根据值的类型转换为字符串
+                    char buffer[256];
+                    if (node->array_assignment.value->type == AST_STRING) {
+                        str_array[index] = strdup(node->array_assignment.value->string_value);
+                    } else if (value_is_int) {
+                        snprintf(buffer, sizeof(buffer), "%d", value_int);
+                        str_array[index] = strdup(buffer);
+                    } else {
+                        snprintf(buffer, sizeof(buffer), "%f", value_float);
+                        str_array[index] = strdup(buffer);
+                    }
+                    
+                    if (str_array[index] == NULL) {
+                        fprintf(stderr, "Error: Memory allocation failed for string assignment\n");
+                        exit(1);
+                    }
+                    printf("Assigned %s[%d] = \"%s\"\n", var_name, index, str_array[index]);
+                    break;
+                }
+                default:
+                    fprintf(stderr, "Error: '%s' is not an array\n", var_name);
+                    exit(1);
+            }
+            
+            *is_int = value_is_int;
+            *int_result = value_int;
+            *float_result = value_float;
+            break;
+        }
+
         case AST_BINARY_OP: {
             ast_interpret_node(node->binary.left, &left_int, &left_float, &left_is_int);
             ast_interpret_node(node->binary.right, &right_int, &right_float, &right_is_int);
