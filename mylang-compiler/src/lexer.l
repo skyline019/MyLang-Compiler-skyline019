@@ -27,9 +27,6 @@ ID      [a-zA-Z_][a-zA-Z0-9_]*
 "return"        { return RETURN; }
 "print"         { return PRINT; }
 
-"["             { return LBRACKET; }
-"]"             { return RBRACKET; }
-
 "=="            { return EQ; }
 "!="            { return NE; }
 "<="            { return LE; }

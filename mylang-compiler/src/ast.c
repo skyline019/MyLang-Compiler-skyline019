@@ -10,10 +10,7 @@ typedef struct {
     int int_value;
     float float_value;
     char* string_value;
-    int type;  // 0: int, 1: float, 2: string, 3: array
-    int* array_data;  // 数组数据
-    int array_size;   // 数组大小
-    int array_type;   // 数组元素类型
+    int type;  // 0: int, 1: float, 2: string
 } Symbol;
 
 // 全局符号表
@@ -77,48 +74,6 @@ static void set_symbol(const char* name, int int_value, float float_value, char*
     symbol_table[symbol_count].float_value = float_value;
     symbol_table[symbol_count].string_value = string_value ? strdup(string_value) : NULL;
     symbol_table[symbol_count].type = type;
-    symbol_table[symbol_count].array_data = NULL;
-    symbol_table[symbol_count].array_size = 0;
-    symbol_table[symbol_count].array_type = 0;
-    symbol_count++;
-}
-
-// 添加或更新数组符号
-static void set_symbol_array(const char* name, int* array_data, int array_size, int array_type) {
-    if (name == NULL) {
-        fprintf(stderr, "Error: NULL variable name\n");
-        exit(1);
-    }
-    
-    for (int i = 0; i < symbol_count; i++) {
-        if (symbol_table[i].name != NULL && strcmp(symbol_table[i].name, name) == 0) {
-            // 如果已存在，释放旧数组
-            if (symbol_table[i].type == 3 && symbol_table[i].array_data != NULL) {
-                free(symbol_table[i].array_data);
-            }
-            
-            symbol_table[i].type = 3; // 数组类型
-            symbol_table[i].array_data = array_data;
-            symbol_table[i].array_size = array_size;
-            symbol_table[i].array_type = array_type;
-            return;
-        }
-    }
-    
-    if (symbol_count >= symbol_capacity) {
-        symbol_capacity = symbol_capacity == 0 ? 8 : symbol_capacity * 2;
-        symbol_table = realloc(symbol_table, symbol_capacity * sizeof(Symbol));
-        if (!symbol_table) {
-            perror("Memory allocation failed");
-            exit(1);
-        }
-    }
-    
-    symbol_table[symbol_count].name = strdup(name);
-    symbol_table[symbol_count].type = 3; // 数组类型
-    symbol_table[symbol_count].array_data = array_data;
-    symbol_table[symbol_count].array_size = array_size;
-    symbol_table[symbol_count].array_type = array_type;
     symbol_count++;
 }
 
@@ -128,9 +83,6 @@ void ast_free_symbol_table() {
         free(symbol_table[i].name);
         if (symbol_table[i].string_value != NULL) {
             free(symbol_table[i].string_value);
-        }
-        if (symbol_table[i].type == 3 && symbol_table[i].array_data != NULL) {
-            free(symbol_table[i].array_data);
         }
     }
     free(symbol_table);
@@ -187,33 +139,6 @@ ASTNode *ast_new_assignment(ASTNode *var, ASTNode *expr, int line_no) {
     node->line_no = line_no;
     node->binary.left = var;
     node->binary.right = expr;
-    return node;
-}
-
-ASTNode *ast_new_array_declaration(char *var_name, ASTNode *size, int line_no) {
-    ASTNode *node = malloc(sizeof(ASTNode));
-    node->type = AST_ARRAY_DECLARATION;
-    node->line_no = line_no;
-    node->array_decl.var_name = strdup(var_name);
-    node->array_decl.size = size;
-    return node;
-}
-
-ASTNode *ast_new_array_access(char *var_name, ASTNode *index, int line_no) {
-    ASTNode *node = malloc(sizeof(ASTNode));
-    node->type = AST_ARRAY_ACCESS;
-    node->line_no = line_no;
-    node->array_access.var_name = strdup(var_name);
-    node->array_access.index = index;
-    return node;
-}
-
-ASTNode *ast_new_array_assignment(ASTNode *array_access, ASTNode *value, int line_no) {
-    ASTNode *node = malloc(sizeof(ASTNode));
-    node->type = AST_ARRAY_ASSIGNMENT;
-    node->line_no = line_no;
-    node->array_assignment.array_access = array_access;
-    node->array_assignment.value = value;
     return node;
 }
 
@@ -370,19 +295,6 @@ void ast_print(ASTNode *node, int indent) {
             ast_print(node->binary.left, indent + 1);
             ast_print(node->binary.right, indent + 1);
             break;
-        case AST_ARRAY_DECLARATION:
-            printf("ARRAY_DECLARATION(%s)\n", node->array_decl.var_name);
-            ast_print(node->array_decl.size, indent + 1);
-            break;
-        case AST_ARRAY_ACCESS:
-            printf("ARRAY_ACCESS(%s)\n", node->array_access.var_name);
-            ast_print(node->array_access.index, indent + 1);
-            break;
-        case AST_ARRAY_ASSIGNMENT:
-            printf("ARRAY_ASSIGNMENT\n");
-            ast_print(node->array_assignment.array_access, indent + 1);
-            ast_print(node->array_assignment.value, indent + 1);
-            break;
         case AST_IF:
             printf("IF\n");
             ast_print(node->if_stmt.cond, indent + 1);
@@ -456,18 +368,6 @@ void ast_free(ASTNode *node) {
         case AST_ASSIGNMENT:
             ast_free(node->binary.left);
             ast_free(node->binary.right);
-            break;
-        case AST_ARRAY_DECLARATION:
-            free(node->array_decl.var_name);
-            ast_free(node->array_decl.size);
-            break;
-        case AST_ARRAY_ACCESS:
-            free(node->array_access.var_name);
-            ast_free(node->array_access.index);
-            break;
-        case AST_ARRAY_ASSIGNMENT:
-            ast_free(node->array_assignment.array_access);
-            ast_free(node->array_assignment.value);
             break;
         case AST_IF:
             ast_free(node->if_stmt.cond);
@@ -587,99 +487,6 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             *int_result = temp_int;
             *float_result = temp_float;
             *is_int = temp_is_int;
-            break;
-        }
-        case AST_ARRAY_DECLARATION: {
-            int size_int;
-            float size_float;
-            bool size_is_int;
-            ast_interpret_node(node->array_decl.size, &size_int, &size_float, &size_is_int);
-            
-            if (!size_is_int || size_int <= 0) {
-                fprintf(stderr, "Error: Array size must be a positive integer\n");
-                exit(1);
-            }
-            
-            // 分配数组内存
-            int* array_data = malloc(size_int * sizeof(int));
-            if (!array_data) {
-                fprintf(stderr, "Error: Memory allocation failed for array\n");
-                exit(1);
-            }
-            
-            // 初始化数组为0
-            for (int i = 0; i < size_int; i++) {
-                array_data[i] = 0;
-            }
-            
-            // 在符号表中添加数组
-            set_symbol_array(node->array_decl.var_name, array_data, size_int, 0); // 0表示int类型数组
-            
-            printf("Declared array %s[%d]\n", node->array_decl.var_name, size_int);
-            
-            *is_int = true;
-            *int_result = 0;
-            *float_result = 0.0f;
-            break;
-        }
-        case AST_ARRAY_ACCESS: {
-            Symbol* sym = find_symbol(node->array_access.var_name);
-            if (sym == NULL || sym->type != 3) { // 3表示数组类型
-                fprintf(stderr, "Error: '%s' is not an array\n", node->array_access.var_name);
-                exit(1);
-            }
-            
-            int index_int;
-            float index_float;
-            bool index_is_int;
-            ast_interpret_node(node->array_access.index, &index_int, &index_float, &index_is_int);
-            
-            if (!index_is_int || index_int < 0 || index_int >= sym->array_size) {
-                fprintf(stderr, "Error: Array index out of bounds\n");
-                exit(1);
-            }
-            
-            *is_int = true;
-            *int_result = sym->array_data[index_int];
-            *float_result = (float)*int_result;
-            break;
-        }
-        case AST_ARRAY_ASSIGNMENT: {
-            // 获取数组访问节点
-            ASTNode* array_access = node->array_assignment.array_access;
-            
-            // 查找数组符号
-            Symbol* sym = find_symbol(array_access->array_access.var_name);
-            if (sym == NULL || sym->type != 3) { // 3表示数组类型
-                fprintf(stderr, "Error: '%s' is not an array\n", array_access->array_access.var_name);
-                exit(1);
-            }
-            
-            // 计算索引
-            int index_int;
-            float index_float;
-            bool index_is_int;
-            ast_interpret_node(array_access->array_access.index, &index_int, &index_float, &index_is_int);
-            
-            if (!index_is_int || index_int < 0 || index_int >= sym->array_size) {
-                fprintf(stderr, "Error: Array index out of bounds\n");
-                exit(1);
-            }
-            
-            // 计算要赋的值
-            int value_int;
-            float value_float;
-            bool value_is_int;
-            ast_interpret_node(node->array_assignment.value, &value_int, &value_float, &value_is_int);
-            
-            // 执行赋值
-            sym->array_data[index_int] = value_int;
-            
-            printf("Assigned %s[%d] = %d\n", array_access->array_access.var_name, index_int, value_int);
-            
-            *is_int = true;
-            *int_result = value_int;
-            *float_result = (float)value_int;
             break;
         }
         case AST_ASSIGNMENT: {
@@ -1003,14 +810,6 @@ void ast_interpret(ASTNode* root) {
                 break;
             case 2:  // string
                 printf("%s = \"%s\"\n", symbol_table[i].name, symbol_table[i].string_value);
-                break;
-            case 3:  // array
-                printf("%s = [", symbol_table[i].name);
-                for (int j = 0; j < symbol_table[i].array_size; j++) {
-                    if (j > 0) printf(", ");
-                    printf("%d", symbol_table[i].array_data[j]);
-                }
-                printf("]\n");
                 break;
         }
     }

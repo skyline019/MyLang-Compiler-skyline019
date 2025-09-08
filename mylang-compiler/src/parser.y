@@ -25,12 +25,10 @@ ASTNode *program_root;
 %token <string> IDENTIFIER STRING
 %token IF ELSE WHILE FOR INT RETURN PRINT
 %token EQ NE LE GE AND OR
-%token LBRACKET RBRACKET
 %token IFX
 
 %type <ast> program stmt_list stmt expr decl block if_stmt while_stmt for_stmt
 %type <ast> logical_expr equality_expr rel_expr add_expr mul_expr primary expr_list
-%type <ast> array_access type
 
 %%
 
@@ -71,17 +69,12 @@ stmt: expr ';' { $$ = $1; }
 | ';' { $$ = ast_new_empty(yylineno); }
 ;
 
-type: INT { /* 无需操作，类型信息在AST节点中处理 */ }
-| FLOAT { /* 无需操作，类型信息在AST节点中处理 */ }
-| STRING { /* 无需操作，类型信息在AST节点中处理 */ }
-;
-
-decl: type IDENTIFIER { $$ = ast_new_declaration($2, yylineno); }
-| type IDENTIFIER '=' expr { $$ = ast_new_declaration_init($2, $4, yylineno); }
-| type IDENTIFIER '[' expr ']' { $$ = ast_new_array_declaration($2, $4, yylineno); }
-;
-
-array_access: IDENTIFIER '[' expr ']' { $$ = ast_new_array_access($1, $3, yylineno); }
+decl: INT IDENTIFIER { $$ = ast_new_declaration($2, yylineno); }
+| INT IDENTIFIER '=' expr { $$ = ast_new_declaration_init($2, $4, yylineno); }
+| FLOAT IDENTIFIER { $$ = ast_new_declaration($2, yylineno); }
+| FLOAT IDENTIFIER '=' expr { $$ = ast_new_declaration_init($2, $4, yylineno); }
+| STRING IDENTIFIER { $$ = ast_new_declaration($2, yylineno); }
+| STRING IDENTIFIER '=' expr { $$ = ast_new_declaration_init($2, $4, yylineno); }
 ;
 
 block: '{' stmt_list '}' { $$ = $2; }
@@ -112,9 +105,7 @@ for_stmt: FOR '(' expr ';' expr ';' expr ')' stmt {
 expr: IDENTIFIER '=' expr { 
     $$ = ast_new_assignment(ast_new_variable($1, yylineno), $3, yylineno); 
 }
-| array_access '=' expr { $$ = ast_new_array_assignment($1, $3, yylineno); }
 | logical_expr { $$ = $1; }
-| array_access { $$ = $1; }
 ;
 
 logical_expr: logical_expr AND equality_expr { 
@@ -176,7 +167,6 @@ primary: INTEGER { $$ = ast_new_integer($1, yylineno); }
 | STRING { $$ = ast_new_string($1, yylineno); }
 | IDENTIFIER { $$ = ast_new_variable($1, yylineno); }
 | '(' expr ')' { $$ = $2; }
-| IDENTIFIER '[' expr ']' { $$ = ast_new_array_access($1, $3, yylineno); }
 | IDENTIFIER '(' ')' {
     ASTNode **args = NULL;
     $$ = ast_new_function_call($1, args, 0, yylineno);

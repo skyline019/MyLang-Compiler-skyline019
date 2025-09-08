@@ -71,9 +71,7 @@ extern int yydebug;
     GE = 272,                      /* GE  */
     AND = 273,                     /* AND  */
     OR = 274,                      /* OR  */
-    LBRACKET = 275,                /* LBRACKET  */
-    RBRACKET = 276,                /* RBRACKET  */
-    IFX = 277                      /* IFX  */
+    IFX = 275                      /* IFX  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -89,7 +87,7 @@ union YYSTYPE
     char *string;
     ASTNode *ast;
 
-#line 93 "build/parser.tab.h"
+#line 91 "build/parser.tab.h"
 
 };
 typedef union YYSTYPE YYSTYPE;
