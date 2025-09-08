@@ -4,16 +4,24 @@
 #include <string.h>
 #include <stdbool.h>
 
+// 明确的类型定义
+#define TYPE_INT 0
+#define TYPE_FLOAT 1
+#define TYPE_STRING 2
+#define TYPE_INT_ARRAY 3
+#define TYPE_FLOAT_ARRAY 4
+#define TYPE_STRING_ARRAY 5
+
 // 简单的符号表结构
 typedef struct {
     char* name;
     int int_value;
     float float_value;
     char* string_value;
-    int type;  // 0: int, 1: float, 2: string, 3: int[], 4: float[], 5: string[]
+    int type;  // 使用明确的类型定义
     int array_size;
     void* array_data;
-    bool is_initialized;  // 添加初始化标志
+    bool is_initialized;
 } Symbol;
 
 // 全局符号表
@@ -84,7 +92,6 @@ static void set_symbol(const char* name, int int_value, float float_value, char*
     symbol_count++;
 }
 
-
 // 释放符号表
 void ast_free_symbol_table() {
     for (int i = 0; i < symbol_count; i++) {
@@ -93,7 +100,7 @@ void ast_free_symbol_table() {
             free(symbol_table[i].string_value);
         }
         if (symbol_table[i].array_data != NULL) {
-            if (symbol_table[i].type == 5) {  // string[]
+            if (symbol_table[i].type == TYPE_STRING_ARRAY) {
                 char** str_array = (char**)symbol_table[i].array_data;
                 for (int j = 0; j < symbol_table[i].array_size; j++) {
                     if (str_array[j] != NULL) {
@@ -141,6 +148,7 @@ ASTNode *ast_new_variable(char *name, int line_no) {
     node->string_value = strdup(name);
     return node;
 }
+
 ASTNode *ast_new_array_declaration(char *var_name, ASTNode *size, int line_no) {
     ASTNode *node = malloc(sizeof(ASTNode));
     node->type = AST_ARRAY_DECLARATION;
@@ -167,6 +175,7 @@ ASTNode *ast_new_array_assignment(ASTNode *array_access, ASTNode *value, int lin
     node->array_assignment.value = value;
     return node;
 }
+
 ASTNode *ast_new_binary_op(char *op, ASTNode *left, ASTNode *right, int line_no) {
     ASTNode *node = malloc(sizeof(ASTNode));
     node->type = AST_BINARY_OP;
@@ -255,7 +264,6 @@ ASTNode *ast_new_function_call(char *func_name, ASTNode **args, int arg_count, i
         exit(1);
     }
     
-    // 初始化所有字段为0或NULL
     memset(node, 0, sizeof(ASTNode));
     
     node->type = AST_FUNCTION_CALL;
@@ -267,7 +275,6 @@ ASTNode *ast_new_function_call(char *func_name, ASTNode **args, int arg_count, i
         exit(1);
     }
     
-    // 复制参数数组
     if (arg_count > 0) {
         node->func_call.args = malloc(sizeof(ASTNode*) * arg_count);
         if (node->func_call.args == NULL) {
@@ -505,7 +512,6 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
         return;
     }
     
-    // 添加调试信息
     printf("Interpreting node type: %d at line %d\n", node->type, node->line_no);
     
     int left_int, right_int;
@@ -520,8 +526,7 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             break;
         }
         case AST_DECLARATION: {
-            // 声明变量，不初始化
-            set_symbol(node->decl.var_name, 0, 0.0f, NULL, 0);
+            set_symbol(node->decl.var_name, 0, 0.0f, NULL, TYPE_INT);
             printf("Declared variable %s\n", node->decl.var_name);
             *is_int = true;
             *int_result = 0;
@@ -529,43 +534,39 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             break;
         }
         case AST_DECLARATION_INIT: {
-            // 声明并初始化变量
             int temp_int;
             float temp_float;
             bool temp_is_int;
             
             ast_interpret_node(node->decl.init_value, &temp_int, &temp_float, &temp_is_int);
             
-            // 根据初始化值的类型设置变量类型
             int type;
             char* string_value = NULL;
             if (node->decl.init_value->type == AST_STRING) {
-                type = 2;  // string
+                type = TYPE_STRING;
                 string_value = node->decl.init_value->string_value;
             } else if (temp_is_int) {
-                type = 0;  // int
+                type = TYPE_INT;
             } else {
-                type = 1;  // float
+                type = TYPE_FLOAT;
             }
             
             set_symbol(node->decl.var_name, temp_int, temp_float, string_value, type);
             
-            if (type == 0) {
+            if (type == TYPE_INT) {
                 printf("Variable %s = %d\n", node->decl.var_name, temp_int);
-            } else if (type == 1) {
+            } else if (type == TYPE_FLOAT) {
                 printf("Variable %s = %f\n", node->decl.var_name, temp_float);
             } else {
                 printf("Variable %s = \"%s\"\n", node->decl.var_name, string_value);
             }
             
-            // 确保将初始化值传递给上层
             *int_result = temp_int;
             *float_result = temp_float;
             *is_int = temp_is_int;
             break;
         }
         case AST_ASSIGNMENT: {
-            // 赋值操作
             int temp_int;
             float temp_float;
             bool temp_is_int;
@@ -573,29 +574,27 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             ast_interpret_node(node->binary.right, &temp_int, &temp_float, &temp_is_int);
             char* var_name = node->binary.left->string_value;
             
-            // 根据赋值的类型设置变量类型
             int type;
             char* string_value = NULL;
             if (node->binary.right->type == AST_STRING) {
-                type = 2;  // string
+                type = TYPE_STRING;
                 string_value = node->binary.right->string_value;
             } else if (temp_is_int) {
-                type = 0;  // int
+                type = TYPE_INT;
             } else {
-                type = 1;  // float
+                type = TYPE_FLOAT;
             }
             
             set_symbol(var_name, temp_int, temp_float, string_value, type);
             
-            if (type == 0) {
+            if (type == TYPE_INT) {
                 printf("Assigned %s = %d\n", var_name, temp_int);
-            } else if (type == 1) {
+            } else if (type == TYPE_FLOAT) {
                 printf("Assigned %s = %f\n", var_name, temp_float);
             } else {
                 printf("Assigned %s = \"%s\"\n", var_name, string_value);
             }
             
-            // 确保将赋值结果传递给上层
             *int_result = temp_int;
             *float_result = temp_float;
             *is_int = temp_is_int;
@@ -617,7 +616,6 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             *is_int = false;
             *int_result = 0;
             *float_result = 0.0f;
-            // 字符串值需要通过其他方式传递，因为当前返回值设计不支持字符串
             break;
         }
         case AST_VARIABLE: {
@@ -626,7 +624,7 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
                 fprintf(stderr, "Error: Variable '%s' not found\n", node->string_value);
                 exit(1);
             }
-            *is_int = (sym->type == 0);  // 只有int类型返回true
+            *is_int = (sym->type == TYPE_INT);
             *int_result = sym->int_value;
             *float_result = sym->float_value;
             break;
@@ -645,35 +643,29 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
                 }
             }
             
-            // 根据数组类型分配内存
-            int type;
+            // 假设所有数组都是int类型（在实际实现中应该在语法分析时记录类型）
+            int type = TYPE_INT_ARRAY;
             void* array_data = NULL;
-            if (strstr(node->array_decl.var_name, "int[]")) {
-                type = 3;  // int[]
-                if (size > 0) {
-                    array_data = calloc(size, sizeof(int));
-                    if (!array_data) {
-                        fprintf(stderr, "Error: Memory allocation failed for int array %s\n", node->array_decl.var_name);
+            
+            if (size > 0) {
+                switch (type) {
+                    case TYPE_INT_ARRAY:
+                        array_data = calloc(size, sizeof(int));
+                        break;
+                    case TYPE_FLOAT_ARRAY:
+                        array_data = calloc(size, sizeof(float));
+                        break;
+                    case TYPE_STRING_ARRAY:
+                        array_data = calloc(size, sizeof(char*));
+                        break;
+                    default:
+                        fprintf(stderr, "Error: Unknown array type\n");
                         exit(1);
-                    }
                 }
-            } else if (strstr(node->array_decl.var_name, "float[]")) {
-                type = 4;  // float[]
-                if (size > 0) {
-                    array_data = calloc(size, sizeof(float));
-                    if (!array_data) {
-                        fprintf(stderr, "Error: Memory allocation failed for float array %s\n", node->array_decl.var_name);
-                        exit(1);
-                    }
-                }
-            } else {
-                type = 5;  // string[]
-                if (size > 0) {
-                    array_data = calloc(size, sizeof(char*));
-                    if (!array_data) {
-                        fprintf(stderr, "Error: Memory allocation failed for string array %s\n", node->array_decl.var_name);
-                        exit(1);
-                    }
+                
+                if (!array_data) {
+                    fprintf(stderr, "Error: Memory allocation failed for array %s\n", node->array_decl.var_name);
+                    exit(1);
                 }
             }
             
@@ -682,13 +674,12 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             symbol_table[symbol_count-1].array_data = array_data;
             symbol_table[symbol_count-1].is_initialized = true;
             
-            printf("Declared array %s with size %d\n", node->array_decl.var_name, size);
+            printf("Declared array %s with size %d (type: %d)\n", node->array_decl.var_name, size, type);
             *is_int = true;
             *int_result = 0;
             *float_result = 0.0f;
             break;
         }
-
         case AST_ARRAY_ACCESS: {
             Symbol* sym = find_symbol(node->array_access.var_name);
             if (sym == NULL) {
@@ -722,22 +713,27 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             }
             
             switch (sym->type) {
-                case 3:  // int[]
+                case TYPE_INT_ARRAY:
                     *is_int = true;
                     *int_result = ((int*)sym->array_data)[index];
                     *float_result = (float)*int_result;
+                    printf("Array access: %s[%d] = %d\n", node->array_access.var_name, index, *int_result);
                     break;
-                case 4:  // float[]
+                case TYPE_FLOAT_ARRAY:
                     *is_int = false;
                     *float_result = ((float*)sym->array_data)[index];
                     *int_result = (int)*float_result;
+                    printf("Array access: %s[%d] = %f\n", node->array_access.var_name, index, *float_result);
                     break;
-                case 5:  // string[]
+                case TYPE_STRING_ARRAY:
                     *is_int = false;
                     *int_result = 0;
                     *float_result = 0.0f;
                     if (((char**)sym->array_data)[index] != NULL) {
-                        // 字符串值需要通过其他方式处理
+                        printf("Array access: %s[%d] = \"%s\"\n", node->array_access.var_name, index, 
+                               ((char**)sym->array_data)[index]);
+                    } else {
+                        printf("Array access: %s[%d] = NULL\n", node->array_access.var_name, index);
                     }
                     break;
                 default:
@@ -746,7 +742,6 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             }
             break;
         }
-
         case AST_ARRAY_ASSIGNMENT: {
             if (!node->array_assignment.array_access || !node->array_assignment.value) {
                 fprintf(stderr, "Error: Invalid array assignment\n");
@@ -791,29 +786,37 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             ast_interpret_node(node->array_assignment.value, &value_int, &value_float, &value_is_int);
             
             switch (sym->type) {
-                case 3:  // int[]
-                    ((int*)sym->array_data)[index] = value_int;
-                    printf("Assigned %s[%d] = %d\n", var_name, index, value_int);
+                case TYPE_INT_ARRAY:
+                    if (value_is_int) {
+                        ((int*)sym->array_data)[index] = value_int;
+                    } else {
+                        ((int*)sym->array_data)[index] = (int)value_float;
+                    }
+                    printf("Assigned %s[%d] = %d\n", var_name, index, ((int*)sym->array_data)[index]);
                     break;
-                case 4:  // float[]
-                    ((float*)sym->array_data)[index] = value_float;
-                    printf("Assigned %s[%d] = %f\n", var_name, index, value_float);
+                case TYPE_FLOAT_ARRAY:
+                    if (value_is_int) {
+                        ((float*)sym->array_data)[index] = (float)value_int;
+                    } else {
+                        ((float*)sym->array_data)[index] = value_float;
+                    }
+                    printf("Assigned %s[%d] = %f\n", var_name, index, ((float*)sym->array_data)[index]);
                     break;
-                case 5: {  // string[]
+                case TYPE_STRING_ARRAY: {
                     char** str_array = (char**)sym->array_data;
                     if (str_array[index] != NULL) {
                         free(str_array[index]);
                     }
                     
-                    // 根据值的类型转换为字符串
-                    char buffer[256];
                     if (node->array_assignment.value->type == AST_STRING) {
                         str_array[index] = strdup(node->array_assignment.value->string_value);
-                    } else if (value_is_int) {
-                        snprintf(buffer, sizeof(buffer), "%d", value_int);
-                        str_array[index] = strdup(buffer);
                     } else {
-                        snprintf(buffer, sizeof(buffer), "%f", value_float);
+                        char buffer[256];
+                        if (value_is_int) {
+                            snprintf(buffer, sizeof(buffer), "%d", value_int);
+                        } else {
+                            snprintf(buffer, sizeof(buffer), "%f", value_float);
+                        }
                         str_array[index] = strdup(buffer);
                     }
                     
@@ -834,15 +837,12 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             *float_result = value_float;
             break;
         }
-
         case AST_BINARY_OP: {
             ast_interpret_node(node->binary.left, &left_int, &left_float, &left_is_int);
             ast_interpret_node(node->binary.right, &right_int, &right_float, &right_is_int);
             
-            // 类型转换规则：如果任一操作数是浮点数，结果就是浮点数
             *is_int = left_is_int && right_is_int;
             
-            // 执行运算
             if (strcmp(node->binary.op, "+") == 0) {
                 if (*is_int) {
                     *int_result = left_int + right_int;
@@ -878,13 +878,11 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
                     fprintf(stderr, "Error: Division by zero\n");
                     exit(1);
                 }
-                // 除法总是产生浮点结果
                 *is_int = false;
                 *float_result = left_float / right_float;
                 *int_result = (int)*float_result;
                 printf("Binary operation: %f / %f = %f\n", left_float, right_float, *float_result);
             } else if (strcmp(node->binary.op, "<") == 0) {
-                // 比较运算总是返回整型结果
                 *is_int = true;
                 if (left_is_int && right_is_int) {
                     *int_result = left_int < right_int ? 1 : 0;
@@ -894,7 +892,6 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
                 *float_result = (float)*int_result;
                 printf("Binary operation: < comparison result = %d\n", *int_result);
             } else if (strcmp(node->binary.op, "<=") == 0) {
-                // 比较运算总是返回整型结果
                 *is_int = true;
                 if (left_is_int && right_is_int) {
                     *int_result = left_int <= right_int ? 1 : 0;
@@ -904,7 +901,6 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
                 *float_result = (float)*int_result;
                 printf("Binary operation: <= comparison result = %d\n", *int_result);
             } else if (strcmp(node->binary.op, ">") == 0) {
-                // 比较运算总是返回整型结果
                 *is_int = true;
                 if (left_is_int && right_is_int) {
                     *int_result = left_int > right_int ? 1 : 0;
@@ -914,7 +910,6 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
                 *float_result = (float)*int_result;
                 printf("Binary operation: > comparison result = %d\n", *int_result);
             } else if (strcmp(node->binary.op, ">=") == 0) {
-                // 比较运算总是返回整型结果
                 *is_int = true;
                 if (left_is_int && right_is_int) {
                     *int_result = left_int >= right_int ? 1 : 0;
@@ -924,7 +919,6 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
                 *float_result = (float)*int_result;
                 printf("Binary operation: >= comparison result = %d\n", *int_result);
             } else if (strcmp(node->binary.op, "==") == 0) {
-                // 比较运算总是返回整型结果
                 *is_int = true;
                 if (left_is_int && right_is_int) {
                     *int_result = left_int == right_int ? 1 : 0;
@@ -934,7 +928,6 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
                 *float_result = (float)*int_result;
                 printf("Binary operation: == comparison result = %d\n", *int_result);
             } else if (strcmp(node->binary.op, "!=") == 0) {
-                // 比较运算总是返回整型结果
                 *is_int = true;
                 if (left_is_int && right_is_int) {
                     *int_result = left_int != right_int ? 1 : 0;
@@ -949,10 +942,8 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             }
             break;
         }
-
         case AST_IF: {
             ast_interpret_node(node->if_stmt.cond, &left_int, &left_float, &left_is_int);
-            // 条件判断：非零为真，零为假
             bool condition = (left_is_int && left_int != 0) || (!left_is_int && left_float != 0.0f);
             
             if (condition) {
@@ -973,7 +964,6 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             
             while (true) {
                 ast_interpret_node(node->while_loop.cond, &left_int, &left_float, &left_is_int);
-                // 条件判断：非零为真，零为假
                 bool condition = (left_is_int && left_int != 0) || (!left_is_int && left_float != 0.0f);
                 
                 if (!condition) break;
@@ -983,21 +973,16 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             break;
         }
         case AST_FOR: {
-            // 初始化
             ast_interpret_node(node->for_loop.init, int_result, float_result, is_int);
             
             while (true) {
-                // 条件检查
                 ast_interpret_node(node->for_loop.cond, &left_int, &left_float, &left_is_int);
-                // 条件判断：非零为真，零为假
                 bool condition = (left_is_int && left_int != 0) || (!left_is_int && left_float != 0.0f);
                 
                 if (!condition) break;
                 
-                // 执行循环体
                 ast_interpret_node(node->for_loop.body, int_result, float_result, is_int);
                 
-                // 更新
                 ast_interpret_node(node->for_loop.update, int_result, float_result, is_int);
             }
             
@@ -1007,7 +992,6 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             break;
         }
         case AST_FUNCTION_CALL: {
-            // 简单起见，我们只实现一个print函数
             if (strcmp(node->func_call.func_name, "print") == 0) {
                 if (node->func_call.arg_count != 1) {
                     fprintf(stderr, "Error: print function expects exactly 1 argument\n");
@@ -1019,7 +1003,6 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
                     exit(1);
                 }
                 
-                // 检查参数类型
                 if (node->func_call.args[0]->type == AST_STRING) {
                     printf("%s\n", node->func_call.args[0]->string_value);
                 } else {
@@ -1043,7 +1026,6 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             }
             break;
         }
-
         case AST_RETURN: {
             ast_interpret_node(node->binary.left, int_result, float_result, is_int);
             printf("Return ");
@@ -1055,7 +1037,6 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
             break;
         }
         case AST_EMPTY: {
-            // 空语句，什么都不做
             *is_int = true;
             *int_result = 0;
             *float_result = 0.0f;
@@ -1081,14 +1062,23 @@ void ast_interpret(ASTNode* root) {
     printf("\n=== Final Variable Values ===\n");
     for (int i = 0; i < symbol_count; i++) {
         switch (symbol_table[i].type) {
-            case 0:  // int
+            case TYPE_INT:
                 printf("%s = %d\n", symbol_table[i].name, symbol_table[i].int_value);
                 break;
-            case 1:  // float
+            case TYPE_FLOAT:
                 printf("%s = %f\n", symbol_table[i].name, symbol_table[i].float_value);
                 break;
-            case 2:  // string
+            case TYPE_STRING:
                 printf("%s = \"%s\"\n", symbol_table[i].name, symbol_table[i].string_value);
+                break;
+            case TYPE_INT_ARRAY:
+                printf("%s = int[%d]\n", symbol_table[i].name, symbol_table[i].array_size);
+                break;
+            case TYPE_FLOAT_ARRAY:
+                printf("%s = float[%d]\n", symbol_table[i].name, symbol_table[i].array_size);
+                break;
+            case TYPE_STRING_ARRAY:
+                printf("%s = string[%d]\n", symbol_table[i].name, symbol_table[i].array_size);
                 break;
         }
     }
