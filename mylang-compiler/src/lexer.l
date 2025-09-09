@@ -30,6 +30,9 @@ ID      [a-zA-Z_][a-zA-Z0-9_]*
 "string[]"      { return STRING_ARRAY; }
 "return"        { return RETURN; }
 "print"         { return PRINT; }
+"function"      { return FUNCTION; }
+":"             { return ':'; }
+
 
 "=="            { return EQ; }
 "!="            { return NE; }
@@ -42,8 +45,35 @@ ID      [a-zA-Z_][a-zA-Z0-9_]*
 "]"             { return ']'; }
 
 \"([^"\\\n]|\\["\\nrt])*\" { 
-    yytext[yyleng-1] = '\0';  // 去掉结束引号
-    yylval.string = strdup(yytext+1);  // 去掉开始引号并复制
+    // 计算实际需要的缓冲区大小
+    size_t buffer_size = yyleng - 1; // 减去开始和结束引号
+    char *buffer = malloc(buffer_size);
+    size_t buf_index = 0;
+    
+    // 跳过开始引号，处理字符串内容
+    for (int i = 1; i < yyleng - 1 && buf_index < buffer_size - 1; i++) {
+        if (yytext[i] == '\\' && i + 1 < yyleng - 1) {
+            // 处理转义字符
+            switch (yytext[i + 1]) {
+                case '"':  buffer[buf_index++] = '"'; break;
+                case '\\': buffer[buf_index++] = '\\'; break;
+                case 'n':  buffer[buf_index++] = '\n'; break;
+                case 'r':  buffer[buf_index++] = '\r'; break;
+                case 't':  buffer[buf_index++] = '\t'; break;
+                default:   buffer[buf_index++] = yytext[i + 1]; break;
+            }
+            i++; // 跳过转义字符的下一个字符
+        } else {
+            // 直接复制字符
+            buffer[buf_index++] = yytext[i];
+        }
+    }
+    
+    // 添加字符串结束符
+    buffer[buf_index] = '\0';
+    
+    // 将处理后的字符串保存到yylval
+    yylval.string = buffer;
     return STRING; 
 }
 

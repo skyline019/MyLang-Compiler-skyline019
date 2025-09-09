@@ -14,18 +14,21 @@ typedef enum {
     AST_VARIABLE,
     AST_BINARY_OP,
     AST_ASSIGNMENT,
-    AST_ARRAY_DECLARATION,
-    AST_ARRAY_ACCESS,
-    AST_ARRAY_ASSIGNMENT,
+    AST_DECLARATION,
+    AST_DECLARATION_INIT,
+    AST_PARAM_DECLARATION,  // 新增参数声明类型
     AST_IF,
     AST_WHILE,
     AST_FOR,
     AST_BLOCK,
-    AST_DECLARATION,
-    AST_DECLARATION_INIT,
     AST_FUNCTION_CALL,
     AST_RETURN,
-    AST_EMPTY
+    AST_EMPTY,
+    AST_FORMATTED_PRINT,
+    AST_ARRAY_DECLARATION,
+    AST_ARRAY_ACCESS,
+    AST_ARRAY_ASSIGNMENT,
+    AST_FUNCTION_DEF
 } ASTNodeType;
 
 // AST节点结构
@@ -84,6 +87,7 @@ typedef struct ASTNode {
         
         struct {
             char* var_name;
+            char* var_type;
             struct ASTNode* init_value;
         } decl;
         
@@ -92,6 +96,20 @@ typedef struct ASTNode {
             struct ASTNode** args;
             int arg_count;
         } func_call;
+        
+        struct {
+            char* func_name;
+            char* return_type;
+            struct ASTNode** params;
+            int param_count;
+            struct ASTNode* body;
+        } func_def;
+        
+        struct {
+            char* format_string;
+            struct ASTNode** args;
+            int arg_count;
+        } formatted_print;
     };
 } ASTNode;
 
@@ -112,8 +130,11 @@ ASTNode *ast_new_block(ASTNode **statements, int count, int line_no);
 ASTNode *ast_new_declaration(char *var_name, int line_no);
 ASTNode *ast_new_declaration_init(char *var_name, ASTNode *init_value, int line_no);
 ASTNode *ast_new_function_call(char *func_name, ASTNode **args, int arg_count, int line_no);
+ASTNode *ast_new_function_def(char *func_name, char *return_type, ASTNode *param_block, ASTNode *body, int line_no);
+ASTNode *ast_new_formatted_print(char *format_string, ASTNode **args, int arg_count, int line_no);
 ASTNode *ast_new_return(ASTNode *expr, int line_no);
 ASTNode *ast_new_empty(int line_no);
+ASTNode *ast_new_param_declaration(char *var_name, char *var_type, int line_no);
 
 // AST打印和释放函数
 void ast_print(ASTNode *node, int indent);
