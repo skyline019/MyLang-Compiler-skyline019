@@ -29,6 +29,31 @@ static Symbol* symbol_table = NULL;
 static int symbol_count = 0;
 static int symbol_capacity = 0;
 
+static char* print_buffer = NULL;
+static int print_buffer_size = 0;
+static int print_buffer_capacity = 0;
+
+static void append_to_print_buffer(const char* str) {
+    if (!str) return;
+    
+    int len = strlen(str);
+    if (print_buffer_size + len + 1 > print_buffer_capacity) {
+        int new_capacity = print_buffer_capacity == 0 ? 256 : print_buffer_capacity * 2;
+        while (print_buffer_size + len + 1 > new_capacity) {
+            new_capacity *= 2;
+        }
+        print_buffer = realloc(print_buffer, new_capacity);
+        if (!print_buffer) {
+            perror("Memory allocation failed for print buffer");
+            exit(1);
+        }
+        print_buffer_capacity = new_capacity;
+    }
+    
+    strcpy(print_buffer + print_buffer_size, str);
+    print_buffer_size += len;
+}
+
 // 查找符号
 static Symbol* find_symbol(const char* name) {
     if (name == NULL) {
@@ -94,6 +119,14 @@ static void set_symbol(const char* name, int int_value, float float_value, char*
 
 // 释放符号表
 void ast_free_symbol_table() {
+    // 释放print缓冲区
+    if (print_buffer) {
+        free(print_buffer);
+        print_buffer = NULL;
+    }
+    print_buffer_size = 0;
+    print_buffer_capacity = 0;
+    
     for (int i = 0; i < symbol_count; i++) {
         free(symbol_table[i].name);
         if (symbol_table[i].string_value != NULL) {
@@ -1003,7 +1036,10 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
                     exit(1);
                 }
                 
+                char temp_output[256];
                 if (node->func_call.args[0]->type == AST_STRING) {
+                    snprintf(temp_output, sizeof(temp_output), "%s\n", node->func_call.args[0]->string_value);
+                    // 立即输出
                     printf("%s\n", node->func_call.args[0]->string_value);
                 } else {
                     int temp_int;
@@ -1011,11 +1047,18 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
                     bool temp_is_int;
                     ast_interpret_node(node->func_call.args[0], &temp_int, &temp_float, &temp_is_int);
                     if (temp_is_int) {
+                        snprintf(temp_output, sizeof(temp_output), "%d\n", temp_int);
+                        // 立即输出
                         printf("%d\n", temp_int);
                     } else {
+                        snprintf(temp_output, sizeof(temp_output), "%f\n", temp_float);
+                        // 立即输出
                         printf("%f\n", temp_float);
                     }
                 }
+                
+                // 保存到缓冲区
+                append_to_print_buffer(temp_output);
                 
                 *is_int = true;
                 *int_result = 0;
@@ -1052,6 +1095,14 @@ void ast_interpret_node(ASTNode* node, int* int_result, float* float_result, boo
 void ast_interpret(ASTNode* root) {
     if (!root) return;
     
+    // 重置print缓冲区
+    if (print_buffer) {
+        free(print_buffer);
+        print_buffer = NULL;
+    }
+    print_buffer_size = 0;
+    print_buffer_capacity = 0;
+    
     int int_result;
     float float_result;
     bool is_int;
@@ -1083,10 +1134,25 @@ void ast_interpret(ASTNode* root) {
         }
     }
     
+    printf("\n=== Print Output ===\n");
+    if (print_buffer && print_buffer_size > 0) {
+        printf("%s", print_buffer);
+    } else {
+        printf("(No print output)\n");
+    }
+    
     printf("\n=== Program Execution Result ===\n");
     if (is_int) {
         printf("Program result: %d\n", int_result);
     } else {
         printf("Program result: %f\n", float_result);
     }
+    
+    // 释放print缓冲区
+    if (print_buffer) {
+        free(print_buffer);
+        print_buffer = NULL;
+    }
+    print_buffer_size = 0;
+    print_buffer_capacity = 0;
 }
