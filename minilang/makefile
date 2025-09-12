@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -I./src
+CFLAGS = -Wall -Wextra -std=c99 -D_GNU_SOURCE -I./src
 BISON = bison
 FLEX = flex
 

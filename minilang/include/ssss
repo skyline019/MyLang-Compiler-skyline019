@@ -10,7 +10,6 @@ static int string_label = 0;
 static int float_label = 0;
 static int label_count = 0;
 static int stack_offset = 4;
-static int array_label = 0; // 用于数组标签
 
 // 变量符号表结构
 typedef struct
@@ -867,41 +866,24 @@ void ast_generate_assembly(ASTNode *node, FILE *output)
 
     case AST_ARRAY_DECLARATION:
     {
-        // 获取数组大小，如果没有指定则使用默认大小12
-        int array_size = 12; // 默认大小
-        if (node->array_decl.size)
-        {
-            ast_generate_assembly(node->array_decl.size, output);
-            fprintf(output, "\tmovl\t%%eax, -%d(%%rbp)\n", stack_offset);
-            fprintf(output, "\tmovl\t-%d(%%rbp), %%eax\n", stack_offset);
-            array_size = node->array_decl.size->int_value;
-        }
+        // 为数组分配48字节空间（12个整数）
+        int array_size = 48;
 
-        // 计算需要的总字节数（每个元素4字节）
-        int total_bytes = array_size * 4;
+        // 先分配栈空间
+        fprintf(output, "\tsubq\t$%d, %%rsp\n", array_size);
 
-        // 确保栈对齐
-        total_bytes = (total_bytes + 15) & ~15;
-
-        // 分配栈空间
-        fprintf(output, "\tsubq\t$%d, %%rsp\n", total_bytes);
-
-        // 添加变量到符号表
+        // 然后添加变量到符号表
         int var_offset = add_variable(node->array_decl.var_name);
 
-        // 初始化数组为0
+        // 使用简单的循环初始化数组为0（避免SSE对齐问题）
         fprintf(output, "\tmovq\t$0, %%rax\n");
-        fprintf(output, "\tmovq\t$%d, %%rcx\n", (total_bytes + 7) / 8); // 按8字节块计算循环次数
+        fprintf(output, "\tmovq\t$6, %%rcx\n"); // 6次循环（48字节 / 8字节每次）
         fprintf(output, "\tleaq\t-%d(%%rbp), %%rdi\n", var_offset);
-        fprintf(output, ".Linit_array_%d:\n", array_label);
+        fprintf(output, ".Linit_array_%d:\n", label_count);
         fprintf(output, "\tmovq\t%%rax, (%%rdi)\n");
         fprintf(output, "\taddq\t$8, %%rdi\n");
-        fprintf(output, "\tloop\t.Linit_array_%d\n", array_label);
-        array_label++;
-
-        // 保存数组大小信息
-        fprintf(output, "\tmovl\t$%d, -%d(%%rbp)\n", array_size, stack_offset);
-        stack_offset += 4;
+        fprintf(output, "\tloop\t.Linit_array_%d\n", label_count);
+        label_count++;
         break;
     }
 
@@ -913,27 +895,14 @@ void ast_generate_assembly(ASTNode *node, FILE *output)
             fprintf(stderr, "Error: Undefined array '%s'\n", node->array_access.var_name);
             exit(1);
         }
-
-        // 生成索引值的汇编代码
         ast_generate_assembly(node->array_access.index, output);
         fprintf(output, "\tmovl\t%%eax, %%ecx\n");
-
-        // 保存索引值
-        fprintf(output, "\tpushq\t%%rcx\n");
-
-        // 获取数组大小
-        fprintf(output, "\tmovl\t-%d(%%rbp), %%edx\n", stack_offset - 4);
-
-        // 恢复索引值
-        fprintf(output, "\tpopq\t%%rcx\n");
-
         // 边界检查
         fprintf(output, "\tcmpl\t$0, %%ecx\n");
         fprintf(output, "\tjl\tarray_bounds_error\n");
-        fprintf(output, "\tcmpl\t%%edx, %%ecx\n");
+        fprintf(output, "\tcmpl\t$11, %%ecx\n");
         fprintf(output, "\tjge\tarray_bounds_error\n");
-
-        // 访问数组元素
+        // 直接访问栈上的数组元素（数组从var_offset开始）
         fprintf(output, "\tmovl\t-%d(%%rbp,%%rcx,4), %%eax\n", var_offset);
         break;
     }
@@ -947,31 +916,16 @@ void ast_generate_assembly(ASTNode *node, FILE *output)
             fprintf(stderr, "Error: Undefined array '%s'\n", array_name);
             exit(1);
         }
-
-        // 生成要赋值的表达式的汇编代码
         ast_generate_assembly(node->array_assignment.value, output);
         fprintf(output, "\tmovl\t%%eax, %%edx\n");
-
-        // 生成索引值的汇编代码
         ast_generate_assembly(node->array_assignment.array_access->array_access.index, output);
         fprintf(output, "\tmovl\t%%eax, %%ecx\n");
-
-        // 保存索引值
-        fprintf(output, "\tpushq\t%%rcx\n");
-
-        // 获取数组大小
-        fprintf(output, "\tmovl\t-%d(%%rbp), %%eax\n", stack_offset - 4);
-
-        // 恢复索引值
-        fprintf(output, "\tpopq\t%%rcx\n");
-
         // 边界检查
         fprintf(output, "\tcmpl\t$0, %%ecx\n");
         fprintf(output, "\tjl\tarray_bounds_error\n");
-        fprintf(output, "\tcmpl\t%%eax, %%ecx\n");
+        fprintf(output, "\tcmpl\t$11, %%ecx\n");
         fprintf(output, "\tjge\tarray_bounds_error\n");
-
-        // 赋值到数组元素
+        // 直接赋值到栈上的数组元素（数组从var_offset开始）
         fprintf(output, "\tmovl\t%%edx, -%d(%%rbp,%%rcx,4)\n", var_offset);
         break;
     }

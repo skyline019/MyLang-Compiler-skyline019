@@ -30,7 +30,7 @@ ASTNode *program_root;
 
 %type <ast> program stmt_list stmt expr decl block if_stmt while_stmt for_stmt
 %type <ast> logical_expr equality_expr rel_expr add_expr mul_expr primary expr_list
-%type <ast> array_decl array_access function_def formatted_print param_list param
+%type <ast> array_decl array_access function_def param_list param
 %type <string> type_specifier
 
 %%
@@ -65,57 +65,39 @@ stmt: expr ';' { $$ = $1; }
 | while_stmt { $$ = $1; }
 | for_stmt { $$ = $1; }
 | RETURN expr ';' { $$ = ast_new_return($2, yylineno); }
-| PRINT expr ';' { 
-    ASTNode *args[] = {$2};
-    $$ = ast_new_function_call("print", args, 1, yylineno);
+| PRINT '(' expr ')' ';' { 
+    // print(a) -> printf("%d", a) 或 printf("%f", a) 或 printf("%s", a)
+    char *format_str;
+    if ($3->type == AST_INTEGER) {
+        format_str = "%d";
+    } else if ($3->type == AST_FLOAT) {
+        format_str = "%f";
+    } else if ($3->type == AST_STRING) {
+        format_str = "%s";
+    } else {
+        // 对于变量或其他表达式，使用通用格式
+        format_str = "%d";
+    }
+    
+    // 创建格式字符串节点
+    ASTNode *format_node = ast_new_string(format_str, yylineno);
+    
+    // 创建参数数组，包含格式字符串和表达式
+    ASTNode **args = malloc(2 * sizeof(ASTNode *));
+    args[0] = format_node;
+    args[1] = $3;
+    
+    $$ = ast_new_formatted_print(format_str, args, 2, yylineno);
 }
-| formatted_print ';' { $$ = $1; }  // 添加格式化输出
-| function_def { $$ = $1; }         // 添加函数定义
-| block { $$ = $1; }
-| ';' { $$ = ast_new_empty(yylineno); }
-;
-
-// 添加格式化输出语法
-formatted_print: PRINT '(' STRING ')' { 
-    // 检查格式字符串是否包含格式说明符
-    char *format = $3;
-    int format_count = 0;
-    for (int i = 0; format[i]; i++) {
-        if (format[i] == '%' && format[i + 1] != '%') {
-            format_count++;
-        }
-    }
-    
-    if (format_count > 0) {
-        fprintf(stderr, "Error: Format string contains %d format specifiers but no arguments provided\n", format_count);
-        YYERROR;
-    }
-    
-    ASTNode **args = NULL;
-    $$ = ast_new_formatted_print($3, args, 0, yylineno);
-}
-| PRINT '(' STRING ',' expr ')' { 
-    // 检查格式字符串中的格式说明符数量
-    char *format = $3;
-    int format_count = 0;
-    for (int i = 0; format[i]; i++) {
-        if (format[i] == '%' && format[i + 1] != '%') {
-            format_count++;
-        }
-    }
-    
-    if (format_count != 1) {
-        fprintf(stderr, "Error: Format string should contain exactly 1 format specifier\n");
-        YYERROR;
-    }
-    
-    // 创建参数数组
+| PRINT '(' STRING ')' ';' { 
+    // print("hello") -> printf("hello")
     ASTNode **args = malloc(sizeof(ASTNode *));
-    args[0] = $5;
+    args[0] = ast_new_string($3, yylineno);
     
     $$ = ast_new_formatted_print($3, args, 1, yylineno);
 }
-| PRINT '(' STRING ',' expr ',' expr ')' { 
+| PRINT '(' STRING ',' expr_list ')' ';' { 
+    // print("value: %d", a) -> printf("value: %d", a)
     // 检查格式字符串中的格式说明符数量
     char *format = $3;
     int format_count = 0;
@@ -125,18 +107,44 @@ formatted_print: PRINT '(' STRING ')' {
         }
     }
     
-    if (format_count != 2) {
-        fprintf(stderr, "Error: Format string should contain exactly 2 format specifiers\n");
+    // 计算实际参数数量
+    int arg_count = 0;
+    ASTNode *current = $5;
+    while (current != NULL) {
+        arg_count++;
+        current = current->binary.right;
+    }
+    
+    if (format_count != arg_count) {
+        fprintf(stderr, "Error: Format string contains %d format specifiers but %d arguments provided\n", format_count, arg_count);
         YYERROR;
     }
     
     // 创建参数数组
-    ASTNode **args = malloc(2 * sizeof(ASTNode *));
-    args[0] = $5;
-    args[1] = $7;
+    ASTNode **args = malloc((arg_count + 1) * sizeof(ASTNode *));
+    args[0] = ast_new_string($3, yylineno);
     
-    $$ = ast_new_formatted_print($3, args, 2, yylineno);
+    // 将表达式列表转换为参数数组
+    current = $5;
+    for (int i = 0; i < arg_count; i++) {
+        args[i + 1] = current->binary.left;
+        current = current->binary.right;
+    }
+    
+    $$ = ast_new_formatted_print($3, args, arg_count + 1, yylineno);
+    
+    // 释放临时的表达式列表节点
+    current = $5;
+    while (current != NULL) {
+        ASTNode *next = current->binary.right;
+        free(current->binary.op);
+        free(current);
+        current = next;
+    }
 }
+| function_def { $$ = $1; }         // 函数定义
+| block { $$ = $1; }
+| ';' { $$ = ast_new_empty(yylineno); }
 ;
 
 function_def: FUNCTION IDENTIFIER '(' param_list ')' ':' type_specifier block {
@@ -168,13 +176,13 @@ param: IDENTIFIER ':' type_specifier {
 }
 ;
 
-// 添加类型说明符规则
+// 类型说明符规则
 type_specifier: INT { $$ = strdup("int"); }
 | FLOAT { $$ = strdup("float"); }
 | STRING { $$ = strdup("string"); }
 | INT_ARRAY { $$ = strdup("int[]"); }
-| FLOAT_ARRAY { $$ = strdup("float[]"); }  // 添加 $$ =
-| STRING_ARRAY { $$ = strdup("string[]"); }  // 添加 $$ =
+| FLOAT_ARRAY { $$ = strdup("float[]"); }
+| STRING_ARRAY { $$ = strdup("string[]"); }
 ;
 
 decl: INT IDENTIFIER { $$ = ast_new_declaration($2, yylineno); }

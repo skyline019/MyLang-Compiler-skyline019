@@ -1,0 +1,85 @@
+    case AST_FORMATTED_PRINT:
+    {
+        // 为每个字符串常量生成唯一标签
+        int format_label = string_label++;
+
+        // 在数据段存储格式字符串
+        fprintf(output, "\t.section .rdata,\"dr\"\n");
+        fprintf(output, ".LS%d:\n", format_label);
+        fprintf(output, "\t.ascii \"");
+
+        // 处理格式字符串中的转义字符
+        for (int i = 0; node->formatted_print.format_string[i]; i++)
+        {
+            switch (node->formatted_print.format_string[i])
+            {
+            case '\n':
+                fprintf(output, "\\n");
+                break;
+            case '\t':
+                fprintf(output, "\\t");
+                break;
+            case '\r':
+                fprintf(output, "\\r");
+                break;
+            case '\\':
+                fprintf(output, "\\\\");
+                break;
+            case '\"':
+                fprintf(output, "\\\"");
+                break;
+            default:
+                if (isprint(node->formatted_print.format_string[i]))
+                {
+                    fputc(node->formatted_print.format_string[i], output);
+                }
+                break;
+            }
+        }
+        fprintf(output, "\\0\"\n");
+        fprintf(output, "\t.section .text\n");
+
+        // 保存所有寄存器
+        fprintf(output, "\tsubq\t$32, %%rsp\n");
+
+        // 处理格式字符串
+        fprintf(output, "\tleaq\t.LS%d(%%rip), %%rcx\n", format_label);
+
+        // 处理所有参数
+        for (int i = 0; i < node->formatted_print.arg_count; i++)
+        {
+            // 跳过第一个参数（格式字符串）
+            if (i == 0)
+                continue;
+
+            // 生成参数值的代码
+            ast_generate_assembly(node->formatted_print.args[i], output);
+
+            // 根据参数位置选择不同的寄存器
+            switch (i - 1) // 减去格式字符串
+            {
+            case 0:
+                fprintf(output, "\tmovl\t%%eax, %%edx\n");
+                break;
+            case 1:
+                fprintf(output, "\tmovl\t%%eax, %%r8d\n");
+                break;
+            case 2:
+                fprintf(output, "\tmovl\t%%eax, %%r9d\n");
+                break;
+            default:
+                fprintf(output, "\tpushq\t%%rax\n");
+                break;
+            }
+        }
+
+        fprintf(output, "\tcall\tprintf\n");
+        fprintf(output, "\taddq\t$32, %%rsp\n");
+
+        // 清理栈上的额外参数
+        if (node->formatted_print.arg_count > 4) // 格式字符串 + 3个寄存器参数
+        {
+            fprintf(output, "\taddq\t$%d, %%rsp\n", (node->formatted_print.arg_count - 4) * 8);
+        }
+        break;
+    }

@@ -273,41 +273,34 @@ void ast_interpret_node(ASTNode *node, int *int_result, float *float_result, boo
         int format_len = strlen(format);
         int arg_index = 0;
 
-        // 立即处理所有参数
+        // 处理所有参数（第一个参数是格式字符串，后面的才是真正的格式化参数）
         int *int_args = NULL;
         float *float_args = NULL;
         bool *int_flags = NULL;
         char **string_args = NULL;
 
-        if (node->formatted_print.arg_count > 0)
+        if (node->formatted_print.arg_count > 1)
         {
-            int_args = malloc(node->formatted_print.arg_count * sizeof(int));
-            float_args = malloc(node->formatted_print.arg_count * sizeof(float));
-            int_flags = malloc(node->formatted_print.arg_count * sizeof(bool));
-            string_args = malloc(node->formatted_print.arg_count * sizeof(char *));
+            int actual_arg_count = node->formatted_print.arg_count - 1;
+            int_args = malloc(actual_arg_count * sizeof(int));
+            float_args = malloc(actual_arg_count * sizeof(float));
+            int_flags = malloc(actual_arg_count * sizeof(bool));
+            string_args = malloc(actual_arg_count * sizeof(char *));
 
-            for (int i = 0; i < node->formatted_print.arg_count; i++)
+            for (int i = 1; i < node->formatted_print.arg_count; i++)
             {
                 if (node->formatted_print.args[i]->type == AST_STRING)
                 {
-                    int_flags[i] = false;
-                    int_args[i] = 0;
-                    float_args[i] = 0.0f;
-                    // 确保字符串值被正确复制
-                    if (node->formatted_print.args[i]->string_value)
-                    {
-                        string_args[i] = strdup(node->formatted_print.args[i]->string_value);
-                    }
-                    else
-                    {
-                        string_args[i] = strdup("");
-                    }
+                    int_flags[i - 1] = false;
+                    int_args[i - 1] = 0;
+                    float_args[i - 1] = 0.0f;
+                    string_args[i - 1] = strdup(node->formatted_print.args[i]->string_value);
                 }
                 else
                 {
                     ast_interpret_node(node->formatted_print.args[i],
-                                       &int_args[i], &float_args[i], &int_flags[i]);
-                    string_args[i] = NULL;
+                                       &int_args[i - 1], &float_args[i - 1], &int_flags[i - 1]);
+                    string_args[i - 1] = NULL;
                 }
             }
         }
@@ -318,13 +311,12 @@ void ast_interpret_node(ASTNode *node, int *int_result, float *float_result, boo
             if (format[i] == '%' && i + 1 < format_len)
             {
                 i++; // 跳过%
-                if (arg_index < node->formatted_print.arg_count)
+                if (arg_index < (node->formatted_print.arg_count - 1))
                 {
                     switch (format[i])
                     {
                     case 'd':
                     case 'i':
-                    case 'n':
                     { // 整数格式
                         char num_str[32];
                         if (int_flags[arg_index])
@@ -333,7 +325,7 @@ void ast_interpret_node(ASTNode *node, int *int_result, float *float_result, boo
                         }
                         else
                         {
-                            snprintf(num_str, sizeof(num_str), "%f", float_args[arg_index]);
+                            snprintf(num_str, sizeof(num_str), "%d", (int)float_args[arg_index]);
                         }
                         strcat(output, num_str);
                         break;
@@ -341,7 +333,14 @@ void ast_interpret_node(ASTNode *node, int *int_result, float *float_result, boo
                     case 'f':
                     { // 浮点数格式
                         char num_str[32];
-                        snprintf(num_str, sizeof(num_str), "%f", float_args[arg_index]);
+                        if (int_flags[arg_index])
+                        {
+                            snprintf(num_str, sizeof(num_str), "%f", (float)int_args[arg_index]);
+                        }
+                        else
+                        {
+                            snprintf(num_str, sizeof(num_str), "%f", float_args[arg_index]);
+                        }
                         strcat(output, num_str);
                         break;
                     }
@@ -349,14 +348,7 @@ void ast_interpret_node(ASTNode *node, int *int_result, float *float_result, boo
                     { // 字符串格式
                         if (string_args[arg_index])
                         {
-                            // 确保只处理ASCII字符
-                            for (int j = 0; string_args[arg_index][j]; j++)
-                            {
-                                if ((unsigned char)string_args[arg_index][j] < 128)
-                                {
-                                    strncat(output, &string_args[arg_index][j], 1);
-                                }
-                            }
+                            strcat(output, string_args[arg_index]);
                         }
                         else
                         {
@@ -391,13 +383,10 @@ void ast_interpret_node(ASTNode *node, int *int_result, float *float_result, boo
             }
             else
             {
-                // 确保只处理ASCII字符
-                if ((unsigned char)format[i] < 128)
-                {
-                    strncat(output, &format[i], 1);
-                }
+                strncat(output, &format[i], 1);
             }
         }
+
         // 释放临时数组
         if (int_args)
             free(int_args);
@@ -407,7 +396,7 @@ void ast_interpret_node(ASTNode *node, int *int_result, float *float_result, boo
             free(int_flags);
         if (string_args)
         {
-            for (int i = 0; i < node->formatted_print.arg_count; i++)
+            for (int i = 0; i < (node->formatted_print.arg_count - 1); i++)
             {
                 if (string_args[i])
                     free(string_args[i]);
@@ -416,15 +405,15 @@ void ast_interpret_node(ASTNode *node, int *int_result, float *float_result, boo
         }
 
         // 立即输出结果
-        printf("%s\n", output);
+        printf("%s", output);
         append_to_print_buffer(output);
-        append_to_print_buffer("\n");
 
         *is_int = true;
         *int_result = 0;
         *float_result = 0.0f;
         break;
     }
+
     case AST_ARRAY_DECLARATION:
     {
         int size = 0;
@@ -939,6 +928,120 @@ void ast_interpret_node(ASTNode *node, int *int_result, float *float_result, boo
 
             // 保存到缓冲区
             append_to_print_buffer(temp_output);
+
+            *is_int = true;
+            *int_result = 0;
+            *float_result = 0.0f;
+        }
+        else if (strcmp(node->func_call.func_name, "printf") == 0)
+        {
+            if (node->func_call.arg_count < 1)
+            {
+                fprintf(stderr, "Error: printf function expects at least 1 argument\n");
+                exit(1);
+            }
+
+            if (node->func_call.args[0] == NULL)
+            {
+                fprintf(stderr, "Error: NULL argument in function call\n");
+                exit(1);
+            }
+
+            // 检查第一个参数是否是字符串（格式字符串）
+            if (node->func_call.args[0]->type != AST_STRING)
+            {
+                fprintf(stderr, "Error: printf first argument must be a format string\n");
+                exit(1);
+            }
+
+            char *format = node->func_call.args[0]->string_value;
+            char output[1024] = {0};
+            int format_len = strlen(format);
+            int arg_index = 1; // 从第二个参数开始，因为第一个是格式字符串
+
+            // 处理格式字符串
+            for (int i = 0; i < format_len; i++)
+            {
+                if (format[i] == '%' && i + 1 < format_len)
+                {
+                    i++; // 跳过%
+                    if (arg_index < node->func_call.arg_count)
+                    {
+                        switch (format[i])
+                        {
+                        case 'd':
+                        case 'i':
+                        { // 整数格式
+                            int temp_int;
+                            float temp_float;
+                            bool temp_is_int;
+                            ast_interpret_node(node->func_call.args[arg_index], &temp_int, &temp_float, &temp_is_int);
+                            char num_str[32];
+                            snprintf(num_str, sizeof(num_str), "%d", temp_int);
+                            strcat(output, num_str);
+                            break;
+                        }
+                        case 'f':
+                        { // 浮点数格式
+                            int temp_int;
+                            float temp_float;
+                            bool temp_is_int;
+                            ast_interpret_node(node->func_call.args[arg_index], &temp_int, &temp_float, &temp_is_int);
+                            char num_str[32];
+                            snprintf(num_str, sizeof(num_str), "%f", temp_float);
+                            strcat(output, num_str);
+                            break;
+                        }
+                        case 's':
+                        { // 字符串格式
+                            if (node->func_call.args[arg_index]->type == AST_STRING)
+                            {
+                                strcat(output, node->func_call.args[arg_index]->string_value);
+                            }
+                            else
+                            {
+                                int temp_int;
+                                float temp_float;
+                                bool temp_is_int;
+                                ast_interpret_node(node->func_call.args[arg_index], &temp_int, &temp_float, &temp_is_int);
+                                char temp_str[32];
+                                if (temp_is_int)
+                                {
+                                    snprintf(temp_str, sizeof(temp_str), "%d", temp_int);
+                                }
+                                else
+                                {
+                                    snprintf(temp_str, sizeof(temp_str), "%f", temp_float);
+                                }
+                                strcat(output, temp_str);
+                            }
+                            break;
+                        }
+                        case '%': // 转义%
+                            strcat(output, "%");
+                            break;
+                        default: // 未知格式符，原样输出
+                            strncat(output, &format[i], 1);
+                            break;
+                        }
+                        arg_index++;
+                    }
+                    else
+                    {
+                        // 参数不足，原样输出格式说明符
+                        char temp[3] = {'%', format[i], '\0'};
+                        strcat(output, temp);
+                    }
+                }
+                else
+                {
+                    strncat(output, &format[i], 1);
+                }
+            }
+
+            // 立即输出结果
+            printf("%s", output);
+            append_to_print_buffer(output);
 
             *is_int = true;
             *int_result = 0;
